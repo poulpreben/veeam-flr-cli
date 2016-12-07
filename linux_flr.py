@@ -1,17 +1,17 @@
+#!/usr/bin/python
+import getpass
 import re
 import requests
 from requests.auth import HTTPBasicAuth
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 import urllib2
 from time import sleep
 
-api_url = 'http://10.0.4.81:9399/api'
-#username = "VCLASS\\administrator"
-#password = "vmware2012"
-username = "rest"
-password = "rest"
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
+api_url = 'https://veaam.domain.local:9398/api/'
 session = False
 
 ## Functions
@@ -21,11 +21,11 @@ def remove_namespace(data):
 	result = re.sub(' xmlns="[^"]+"', '', data, count=1)
 	return result
 
-def create_session():
+def create_session(username, password):
 	global session
-	
+
 	session = requests.Session()
-	r = session.post(api_url+'/sessionMngr/?v=latest', auth=(username, password))
+	r = session.post(api_url+'/sessionMngr/?v=latest', auth=(username, password), verify=False)
 
 	links      = ET.fromstring(remove_namespace(r.content))
 	session_id = links.find("SessionId").text
@@ -34,7 +34,7 @@ def create_session():
 
 def delete_session(session_id):
 	r = session.delete(api_url+'/logonSessions/'+session_id)
-	
+
 	return
 
 def list_catalog(name):
@@ -58,7 +58,7 @@ def catalog_restore_points(name):
 	catalog_name = urllib2.quote(name)
 	r = session.get(api_url+'/catalog/vms/'+catalog_name+'/vmRestorePoints?format=Entity&sort=BackupDateUTC')
 	rps = ET.fromstring(remove_namespace(r.content))
-	
+
 	result = []
 	if len(rps) == 0:
 		return result
@@ -75,7 +75,7 @@ def catalog_restore_points(name):
 
 def prepare_browse(url):
 	url = url + '?action=browse'
-	r = session.post(url)
+	r = session.post(url, verify=False)
 	if (r.status_code == 200):
 		return True
 	else:
@@ -93,7 +93,7 @@ def check_file(url, f):
 
 def restore_file(url, f):
 	url = url + '/guestfs/' + urllib2.quote(f) + '?action=restore'
-	r = session.post(url)
+	r = session.post(url, verify=False)
 
 	restore_status = ET.fromstring(remove_namespace(r.content))
 
@@ -108,7 +108,7 @@ def restore_file(url, f):
 		r = session.get(api_url+"/tasks/"+task_id)
 		restore_status = ET.fromstring(remove_namespace(r.content))
 		task_state = restore_status.find("State").text
-			
+
 	if restore_status.find("Result").attrib.get("Success") == "false":
 		return False
 	else:
@@ -124,12 +124,18 @@ def get_restore_session(task_id):
 def debug(xmlString):
 	data   = xml.dom.minidom.parseString(xmlString)
 	pretty = data.toprettyxml()
-	
+
 	return pretty
 
 
 ## Runtime code
-session_id = create_session()
+print "Python Linux FLR Tool for Veeam 9.5 / EM 9.5"
+print " "
+em_user = raw_input("EM username: ")
+em_pass = False
+em_pass = getpass.getpass("EM password: ")
+
+session_id = create_session(em_user, em_pass)
 
 vm_name = raw_input("Enter VM name: ")
 catalog = catalog_restore_points(vm_name)
@@ -141,11 +147,6 @@ if len(catalog) > 0:
 	if prepare_browse(url):
 		f = raw_input("Enter file name to restore: ")
 		print " "
-		
-		# print "Checking if file '%s' exists in catalog, please wait..." % f
-		# print check_file(url, f)
-		# This is apparently not supported in the API.
-		# returns 501: File entity view is not supported.
 
 		if restore_file(url, f):
 			print "Restore of file '%s' initiated." % f
@@ -157,4 +158,3 @@ else:
 	print "No index found for VM with name '%s'" % vm_name
 
 delete_session(session_id)
-
